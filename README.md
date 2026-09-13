@@ -82,7 +82,8 @@ tracked, the main checkout not on the base branch, any commit on it since
 (fast-forwards, `--no-verify`, resets, rebases and cherry-picks all leave
 commits without it), worktrees without handoffs, handoffs without worktrees,
 and the lab, `AGENTS.md`, exclusion and hooks that `init` should have left
-behind. On a repo that predates labgate, its output is the migration list.
+behind; it notes, without failing, a base branch whose `mergeOptions` is not
+`--no-ff`. On a repo that predates labgate, its output is the migration list.
 
 The guard is a local discipline aid, not branch protection: hooks and config
 are per clone, `LABGATE_PROMOTE=1` and `--no-verify` are conscious bypasses,

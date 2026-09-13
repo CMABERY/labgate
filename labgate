@@ -136,6 +136,8 @@ cmd_audit() {
   if [[ -z "$(git config --get core.hooksPath || true)" ]]; then
     hook_ok pre-commit && hook_ok pre-merge-commit || { echo "labgate hooks missing (run labgate init)"; fail=1; }
   fi
+  git config --get "branch.$base.mergeOptions" 2>/dev/null | grep -q -- --no-ff \
+    || echo "note: branch.$base.mergeOptions is not --no-ff; fast-forward merges into $base meet no hook (run labgate init)"
 
   hit="$(printf '%s\n' "$tree" | grep -Ei "$scaffold" || true)"
   [[ -n "$hit" ]] && { echo "scaffolding-named files on $base:"; echo "$hit"; fail=1; }

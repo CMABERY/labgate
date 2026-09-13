@@ -122,7 +122,8 @@ test_start() {
 
 test_audit() {
   fresh
-  "$labgate" audit >/dev/null || fail "fresh repo should pass audit"
+  out="$("$labgate" audit 2>&1)" || fail "fresh repo should pass audit"
+  ! grep -q 'note:' <<<"$out" || fail "fresh repo audit should have no notes: $out"
   "$labgate" start feature >/dev/null
   rm "$lab/handoff/feature.md"
   printf 'h\n' > "$lab/handoff/ghost.md"
@@ -136,6 +137,7 @@ test_audit() {
     grep -q "$want" <<<"$out" || fail "did not report: $want"$'\n'"$out"
   done
   git config --unset branch.main.mergeOptions
+  grep -q 'note: branch.main.mergeOptions is not --no-ff' <<<"$("$labgate" audit 2>&1)" || fail "missing mergeOptions not noted"
   branch sneaky; printf 's\n' >> README.md; commit 'messy 1'; git checkout -q main
   git merge -q sneaky   # fast-forward: no hook can see it
   grep -q 'messy 1' <<<"$("$labgate" audit 2>&1)" || fail "fast-forwarded commit not reported"
