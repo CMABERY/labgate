@@ -30,8 +30,9 @@ may not add features, rename for taste, reformat, or refactor beyond inlining.
 6. Rerun the tests on `{{BASE}}`.
 7. Write ≤10 lines to `$LAB/notes/YYYY-MM-DD-$BRANCH.md`: decided, rejected,
    still uncertain, and any `check` finding you kept.
-8. Only after step 6 passes:
-   `git -C $ROOT worktree remove .worktrees/$BRANCH && git -C $ROOT branch -D $BRANCH && rm $LAB/handoff/$BRANCH.md`
+8. Only after step 6 passes: `labgate -C $ROOT close $BRANCH`. It removes the
+   worktree, the branch and the handoff, and refuses without the note from
+   step 7 or with uncommitted changes in the worktree.
 
 Report: the commit hash on `{{BASE}}`, the commands run in steps 4 and 6, and
 what was deleted.

@@ -4,6 +4,7 @@
 #   labgate [-C <dir>] init                    create <repo>.lab beside this repo and install the rules (idempotent)
 #   labgate [-C <dir>] start <branch>          new worktree at .worktrees/<branch> plus a handoff to fill in
 #   labgate [-C <dir>] check <branch> [max]    fail if <branch> is not ready to promote
+#   labgate [-C <dir>] close <branch>          after promotion: remove the worktree, branch and handoff
 #
 # -C runs as if started in <dir> (anywhere inside the repo or one of its worktrees).
 # Base branch: LABGATE_BASE, else git config labgate.base (set by init), else main.
@@ -26,6 +27,7 @@ usage:
   labgate [-C <dir>] init                    create <repo>.lab beside this repo and install the rules (idempotent)
   labgate [-C <dir>] start <branch>          new worktree at .worktrees/<branch> plus a handoff to fill in
   labgate [-C <dir>] check <branch> [max]    fail if <branch> is not ready to promote
+  labgate [-C <dir>] close <branch>          after promotion: remove the worktree, branch and handoff
 EOF
   exit 2
 }
@@ -134,6 +136,21 @@ cmd_check() {
   echo "ok: $branch is ready to promote onto $base"
 }
 
+# A squash merge leaves no trace git can verify, so the promotion's decision
+# note is the receipt that authorises deleting the branch.
+cmd_close() {
+  locate
+  local branch="${1:-}" wt handoff receipt
+  [[ -n "$branch" ]] || usage
+  wt="$root/.worktrees/$branch"; handoff="$lab/handoff/$branch.md"
+  receipt="$(find "$lab/notes" -maxdepth 1 -name "*-$branch.md" 2>/dev/null | sort | tail -n 1)"
+  [[ -n "$receipt" ]] || die "no decision note $lab/notes/YYYY-MM-DD-$branch.md; write it (PROMOTE.md step 7) before closing"
+  [[ ! -d "$wt" ]] || git -C "$root" worktree remove "$wt"
+  ! git rev-parse --verify -q "$branch" >/dev/null || git -C "$root" branch -qD "$branch"
+  [[ ! -f "$handoff" ]] || rm "$handoff"
+  say "closed $branch; receipt: $receipt"
+}
+
 if [[ "${1:-}" == -C ]]; then
   cd "${2:?-C needs a directory}" || die "cannot cd to $2"
   shift 2
@@ -142,5 +159,6 @@ case "${1:-}" in
   init)  shift; cmd_init "$@" ;;
   start) shift; cmd_start "$@" ;;
   check) shift; cmd_check "$@" ;;
+  close) shift; cmd_close "$@" ;;
   *)     usage ;;
 esac

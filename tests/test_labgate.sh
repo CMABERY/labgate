@@ -62,6 +62,20 @@ test_start() {
   ! "$labgate" start other 2>/dev/null || fail "start without a lab should refuse"
 }
 
+test_close() {
+  fresh
+  "$labgate" start feature >/dev/null
+  ! "$labgate" close feature 2>/dev/null || fail "close without a decision note should refuse"
+  printf 'note\n' > "$lab/notes/2026-01-01-feature.md"
+  printf 'x\n' > .worktrees/feature/untracked
+  ! "$labgate" close feature 2>/dev/null || fail "close with a dirty worktree should refuse"
+  rm .worktrees/feature/untracked
+  "$labgate" close feature >/dev/null || fail "close failed"
+  [[ ! -e .worktrees/feature ]] || fail "worktree still present"
+  ! git rev-parse --verify -q feature >/dev/null || fail "branch still present"
+  [[ ! -e $lab/handoff/feature.md ]] || fail "handoff still present"
+}
+
 test_check() {
   fresh
   branch messy
