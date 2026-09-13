@@ -13,6 +13,7 @@ templates/
   lab.AGENTS.md          inner rules, installed as <repo>.lab/AGENTS.md
   PROMOTE.md             the promotion procedure, installed into the lab
   handoff.md             builder → promoter declaration, installed as handoff/TEMPLATE.md
+  pre-commit             hook installed into <repo>/.git/hooks: base branch = promotions only
 tests/test_labgate.sh    exercises init and check in a throwaway repo
 ```
 
@@ -25,7 +26,8 @@ ln -s "$PWD/labgate" ~/.local/bin/labgate   # optional; the script also runs by 
 
 cd ~/projects/foo        # an existing git repo
 labgate init             # creates ../foo.lab, installs AGENTS.md, excludes .worktrees/,
-                         # records the base branch; safe to re-run
+                         # records the base branch, installs a pre-commit hook that
+                         # refuses ordinary commits on main; safe to re-run
 
 labgate start feature    # worktree at .worktrees/feature + ../foo.lab/handoff/feature.md
 # build in the worktree; finish by filling in the handoff
@@ -37,7 +39,9 @@ labgate close feature    # removes worktree, branch and handoff; needs the decis
 ```
 
 `init` never overwrites an `AGENTS.md`. It always refreshes the lab's
-`PROMOTE.md` and `handoff/TEMPLATE.md`, which labgate owns.
+`PROMOTE.md` and `handoff/TEMPLATE.md`, which labgate owns. The hook is skipped
+when `core.hooksPath` is set or a foreign `pre-commit` exists; the promoter
+commits with `LABGATE_PROMOTE=1`.
 
 `check` lists its findings and exits 1 when, relative to the base branch, the
 branch has any of:
@@ -64,6 +68,7 @@ The base branch is `LABGATE_BASE` if set, else `git config labgate.base`
 ```
 foo/                     product; main = one squash commit per promoted change
   AGENTS.md              outer rules (subtractive)
+  .git/hooks/pre-commit  refuses commits on main unless LABGATE_PROMOTE=1
   .worktrees/<branch>/   where building happens; excluded via .git/info/exclude
 foo.lab/                 progression; its own git repo, never merged, never shipped
   AGENTS.md              inner rules (permissive)

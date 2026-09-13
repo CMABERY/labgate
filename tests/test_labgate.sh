@@ -17,7 +17,7 @@ fresh() {
   printf 'print(1)\n' > tool.py
   git add -A && git commit -qm init
   "$labgate" init >/dev/null
-  git add AGENTS.md && git commit -qm 'add outer rules'
+  git add AGENTS.md && LABGATE_PROMOTE=1 git commit -qm 'add outer rules'
 }
 branch()  { git checkout -q main && git checkout -qb "$1"; }
 commit()  { git add -A && git commit -qm "$1"; }
@@ -47,6 +47,27 @@ test_init() {
   ( cd / && "$labgate" -C "$repo/.worktrees/wt" init >/dev/null ) || fail "-C ignored"
   ! ( cd / && "$labgate" init 2>/dev/null ) || fail "outside a repo should fail"
   [[ ! -e $repo/.worktrees/wt.lab ]] || fail "init from a worktree resolved the wrong root"
+}
+
+test_hook() {
+  fresh
+  [[ -x .git/hooks/pre-commit ]] && grep -q 'Installed by labgate' .git/hooks/pre-commit || fail "hook not installed"
+  printf 'x\n' >> README.md
+  ! git commit -qam 'direct' 2>/dev/null || fail "commit on main should be refused"
+  LABGATE_PROMOTE=1 git commit -qam 'promotion' || fail "LABGATE_PROMOTE=1 commit refused"
+  branch side
+  printf 'y\n' >> README.md
+  git commit -qam 'on a branch' || fail "commit on a branch refused"
+  git checkout -q main
+
+  printf '#!/bin/sh\nexit 0\n' > .git/hooks/pre-commit
+  "$labgate" init >/dev/null
+  ! grep -q 'Installed by labgate' .git/hooks/pre-commit || fail "foreign hook overwritten"
+  rm .git/hooks/pre-commit
+  git config core.hooksPath "$work/hooks"
+  "$labgate" init >/dev/null
+  [[ ! -e .git/hooks/pre-commit ]] || fail "hook installed despite core.hooksPath"
+  git config --unset core.hooksPath
 }
 
 test_start() {

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Installed by labgate init. The base branch only receives promotions.
+[[ -n "${LABGATE_PROMOTE:-}" ]] && exit 0
+base="${LABGATE_BASE:-$(git config --get labgate.base || echo main)}"
+[[ "$(git symbolic-ref --short -q HEAD)" == "$base" ]] || exit 0
+cat >&2 <<EOF
+labgate: '$base' only receives promotions.
+  build:    labgate start <branch>
+  promote:  LABGATE_PROMOTE=1 git commit ...   (PROMOTE.md step 5)
+EOF
+exit 1

@@ -24,7 +24,8 @@ may not add features, rename for taste, reformat, or refactor beyond inlining.
 3. `README.md`: does it describe what `{{BASE}}` will do after this merge?
    Fix it in place. Do not describe how it got there.
 4. Run the tests. Run the tool once end to end. Record the exact commands.
-5. `git -C $ROOT merge --squash $BRANCH && git -C $ROOT commit -m "<behavior change>"`.
+5. `git -C $ROOT merge --squash $BRANCH && LABGATE_PROMOTE=1 git -C $ROOT commit -m "<behavior change>"`.
+   (The pre-commit hook refuses commits on `{{BASE}}` without that variable.)
    One commit; imperative; ≤72 characters. If the branch is genuinely two
    changes, split it and squash twice.
 6. Rerun the tests on `{{BASE}}`.

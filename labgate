@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # labgate — keep a project's progression out of its product.
 #
-#   labgate [-C <dir>] init                    create <repo>.lab beside this repo and install the rules (idempotent)
+#   labgate [-C <dir>] init                    create <repo>.lab beside this repo; install rules and hook (idempotent)
 #   labgate [-C <dir>] start <branch>          new worktree at .worktrees/<branch> plus a handoff to fill in
 #   labgate [-C <dir>] check <branch> [max]    fail if <branch> is not ready to promote
 #   labgate [-C <dir>] close <branch>          after promotion: remove the worktree, branch and handoff
@@ -24,7 +24,7 @@ say() { printf '%s\n' "$*"; }
 usage() {
   cat >&2 <<'EOF'
 usage:
-  labgate [-C <dir>] init                    create <repo>.lab beside this repo and install the rules (idempotent)
+  labgate [-C <dir>] init                    create <repo>.lab beside this repo; install rules and hook (idempotent)
   labgate [-C <dir>] start <branch>          new worktree at .worktrees/<branch> plus a handoff to fill in
   labgate [-C <dir>] check <branch> [max]    fail if <branch> is not ready to promote
   labgate [-C <dir>] close <branch>          after promotion: remove the worktree, branch and handoff
@@ -71,13 +71,28 @@ cmd_init() {
   render "$templates/handoff.md" > "$lab/handoff/TEMPLATE.md"
   if [[ ! -e "$root/AGENTS.md" ]]; then
     render "$templates/repo.AGENTS.md" > "$root/AGENTS.md"
-    say "installed $root/AGENTS.md; commit it"
+    say "installed $root/AGENTS.md; commit it with: LABGATE_PROMOTE=1 git commit"
   fi
   mkdir -p "$common/info"
   grep -qsx '.worktrees/' "$common/info/exclude" || printf '.worktrees/\n' >> "$common/info/exclude"
   git config --get labgate.base  >/dev/null || git config labgate.base "$base"
   git config --get labgate.since >/dev/null || git config labgate.since "$(git rev-parse --verify -q "$base" || true)"
+  install_hook
   say "ok: $name and $lab (base: $base)"
+}
+
+# Refuse ordinary commits on the base branch. Per clone, never tracked.
+install_hook() {
+  local hook="$common/hooks/pre-commit"
+  if [[ -n "$(git config --get core.hooksPath || true)" ]]; then
+    say "core.hooksPath is set; not installing the pre-commit hook"
+  elif [[ -e "$hook" ]] && ! grep -q 'Installed by labgate' "$hook"; then
+    say "$hook exists and is not labgate's; not installing the hook"
+  else
+    [[ -e "$hook" ]] || say "installed $hook: $base only receives promotions"
+    mkdir -p "$common/hooks"
+    cp "$templates/pre-commit" "$hook" && chmod +x "$hook"
+  fi
 }
 
 cmd_start() {
