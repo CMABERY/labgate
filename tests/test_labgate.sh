@@ -121,7 +121,14 @@ test_close() {
   fresh
   "$labgate" start feature >/dev/null
   ! "$labgate" close feature 2>/dev/null || fail "close without a decision note should refuse"
+  printf 'note\n' > "$lab/notes/2026-01-01-my-feature.md"
+  ! "$labgate" close feature 2>/dev/null || fail "another branch's note accepted as receipt"
+  printf 'note\n' > "$lab/notes/undated-feature.md"
+  ! "$labgate" close feature 2>/dev/null || fail "undated note accepted as receipt"
   printf 'note\n' > "$lab/notes/2026-01-01-feature.md"
+  git worktree remove .worktrees/feature && git worktree add -q "$work/elsewhere" feature
+  ! "$labgate" close feature 2>/dev/null || fail "close with the branch checked out elsewhere should refuse"
+  git worktree remove "$work/elsewhere" && git worktree add -q .worktrees/feature feature
   printf 'x\n' > .worktrees/feature/untracked
   ! "$labgate" close feature 2>/dev/null || fail "close with a dirty worktree should refuse"
   rm .worktrees/feature/untracked

@@ -208,11 +208,14 @@ cmd_check() {
 # note is the receipt that authorises deleting the branch.
 cmd_close() {
   locate
-  local branch="${1:-}" wt handoff receipt
+  local branch="${1:-}" wt handoff receipt elsewhere
   [[ -n "$branch" ]] || usage
   wt="$root/.worktrees/$branch"; handoff="$lab/handoff/$branch.md"
-  receipt="$(find "$lab/notes" -maxdepth 1 -name "*-$branch.md" 2>/dev/null | sort | tail -n 1)"
+  receipt="$(find "$lab/notes" -maxdepth 1 -name "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-$branch.md" 2>/dev/null | sort | tail -n 1)"
   [[ -n "$receipt" ]] || die "no decision note $lab/notes/YYYY-MM-DD-$branch.md; write it (PROMOTE.md step 7) before closing"
+  elsewhere="$(git -C "$root" worktree list --porcelain \
+    | awk -v b="branch refs/heads/$branch" -v wt="$wt" '/^worktree /{w=substr($0,10)} $0==b && w!=wt {print w}')"
+  [[ -z "$elsewhere" ]] || die "$branch is checked out in $elsewhere; not closing"
   [[ ! -d "$wt" ]] || git -C "$root" worktree remove "$wt"
   ! git rev-parse --verify -q "$branch" >/dev/null || git -C "$root" branch -qD "$branch"
   [[ ! -f "$handoff" ]] || rm "$handoff"
