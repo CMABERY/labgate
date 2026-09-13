@@ -7,5 +7,6 @@ cat >&2 <<EOF
 labgate: '$base' only receives promotions.
   build:    labgate start <branch>
   promote:  LABGATE_PROMOTE=1 git commit ...   (PROMOTE.md step 5)
+  if this was a merge: git merge --abort
 EOF
 exit 1

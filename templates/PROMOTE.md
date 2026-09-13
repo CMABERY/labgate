@@ -25,8 +25,10 @@ may not add features, rename for taste, reformat, or refactor beyond inlining.
    Fix it in place. Do not describe how it got there.
 4. Run the tests. Run the tool once end to end. Record the exact commands.
 5. `git -C $ROOT symbolic-ref --short HEAD` must print `{{BASE}}`; stop if it does not.
-   `git -C $ROOT merge --squash $BRANCH && LABGATE_PROMOTE=1 git -C $ROOT commit -m "<behavior change>"`.
-   (The pre-commit hook refuses commits on `{{BASE}}` without that variable.)
+   `git -C $ROOT merge --ff --squash $BRANCH && LABGATE_PROMOTE=1 git -C $ROOT commit -m "<behavior change>" -m "Promoted-from: $BRANCH"`
+   The hook refuses commits on `{{BASE}}` without the variable; `--ff` is
+   needed because ordinary merges into `{{BASE}}` are configured `--no-ff`;
+   the trailer is how `labgate audit` recognises a promotion.
    One commit; imperative; ≤72 characters. If the branch is genuinely two
    changes, split it and squash twice.
 6. Rerun the tests on `{{BASE}}`.

@@ -27,8 +27,8 @@ ln -s "$PWD/labgate" ~/.local/bin/labgate   # optional; the script also runs by 
 
 cd ~/projects/foo        # an existing git repo
 labgate init             # creates ../foo.lab, installs AGENTS.md, excludes .worktrees/,
-                         # records the base branch, installs a pre-commit hook that
-                         # refuses ordinary commits on main; safe to re-run
+                         # records the base branch, installs hooks that refuse ordinary
+                         # commits and merges on main; safe to re-run
 
 labgate start feature    # worktree at .worktrees/feature + ../foo.lab/handoff/feature.md
 # build in the worktree; finish by filling in the handoff
@@ -66,12 +66,19 @@ justifies the finding in the decision note.
 The base branch is `LABGATE_BASE` if set, else `git config labgate.base`
 (recorded by `init`), else `main`, else `master`.
 
-`audit` applies the same taste to the main checkout instead of a branch:
+`audit` applies the same taste to the base branch instead of a feature branch:
 scaffolding-named or extra top-level markdown files tracked, `.worktrees/`
-tracked, merge commits on the base branch since `init` (promotions are
-squashes), worktrees without handoffs, handoffs without worktrees, and the
-lab, `AGENTS.md`, exclusion and hooks that `init` should have left behind. On a
-repo that predates labgate, its output is the migration list.
+tracked, the main checkout not on the base branch, any commit on it since
+`init` without the `Promoted-from:` trailer that PROMOTE.md step 5 writes
+(fast-forwards, `--no-verify`, resets, rebases and cherry-picks all leave
+commits without it), worktrees without handoffs, handoffs without worktrees,
+and the lab, `AGENTS.md`, exclusion and hooks that `init` should have left
+behind. On a repo that predates labgate, its output is the migration list.
+
+The guard is a local discipline aid, not branch protection: hooks and config
+are per clone, `LABGATE_PROMOTE=1` and `--no-verify` are conscious bypasses,
+and `git pull` into the base branch is refused like any other non-promotion
+because the model assumes the base branch is produced here and pushed out.
 
 ## What you get
 
@@ -79,6 +86,7 @@ repo that predates labgate, its output is the migration list.
 foo/                     product; main = one squash commit per promoted change
   AGENTS.md              outer rules (subtractive)
   .git/hooks/pre-commit  with pre-merge-commit: refuse commits on main unless LABGATE_PROMOTE=1
+  .git/config            labgate.base, labgate.since, branch.main.mergeOptions=--no-ff
   .worktrees/<branch>/   where building happens; excluded via .git/info/exclude
 foo.lab/                 progression; its own git repo, never merged, never shipped
   AGENTS.md              inner rules (permissive)

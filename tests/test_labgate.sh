@@ -17,8 +17,9 @@ fresh() {
   printf 'print(1)\n' > tool.py
   git add -A && git commit -qm init
   "$labgate" init >/dev/null
-  git add AGENTS.md && LABGATE_PROMOTE=1 git commit -qm 'add outer rules'
+  git add AGENTS.md && LABGATE_PROMOTE=1 git commit -qm 'add outer rules' -m 'Promoted-from: init'
 }
+promote() { git checkout -q main && git merge -q --ff --squash "$1" >/dev/null && LABGATE_PROMOTE=1 git commit -qm "$1" -m "Promoted-from: $1"; }
 branch()  { git checkout -q main && git checkout -qb "$1"; }
 commit()  { git add -A && git commit -qm "$1"; }
 handoff() { printf '# handoff: %s\nBehavior change: adds output.\nScaffolding left on the branch: none.\nUncertain: nothing.\nREADME.md: unchanged.\nVerified: tests.\n' "$1" > "$lab/handoff/$1.md"; }
@@ -45,6 +46,10 @@ test_init() {
   grep -qx '.worktrees/' .git/info/exclude || fail ".worktrees/ not excluded"
   [[ $(git config labgate.base) == main ]] || fail "labgate.base not set"
   [[ $(git config labgate.since) == $(git rev-parse main~1) ]] || fail "labgate.since is not the init-time head"
+  [[ $(git config branch.main.mergeOptions) == --no-ff ]] || fail "mergeOptions not set"
+  git config branch.main.mergeOptions --ff-only; "$labgate" init >/dev/null
+  [[ $(git config branch.main.mergeOptions) == --ff-only ]] || fail "existing mergeOptions overwritten"
+  git config branch.main.mergeOptions --no-ff
 
   printf 'custom\n' >> "$lab/AGENTS.md"
   printf 'custom\n' >> "$lab/PROMOTE.md"
@@ -77,8 +82,12 @@ test_hook() {
   printf 'y\n' >> README.md
   git commit -qam 'on a branch' || fail "commit on a branch refused"
   git checkout -q main
-  ! git merge -q --no-ff side 2>/dev/null || fail "merge into main should be refused"
+  ! git merge -q side 2>/dev/null || fail "plain (fast-forwardable) merge into main should be refused"
   git merge --abort 2>/dev/null || true
+  [[ $(git rev-parse main) != $(git rev-parse side) ]] || fail "fast-forward slipped through"
+  ! git merge -q --squash side 2>/dev/null || fail "--squash alone should conflict with --no-ff"
+  git merge -q --ff --squash side >/dev/null || fail "--ff --squash should stage the squash"
+  git reset -q --hard
   LABGATE_PROMOTE=1 git merge -q --no-ff side || fail "LABGATE_PROMOTE=1 merge refused"
 
   printf '#!/bin/sh\nexit 0\n' > .git/hooks/pre-commit
@@ -116,16 +125,23 @@ test_audit() {
   LABGATE_PROMOTE=1 git merge -q --no-ff side
   rm .git/hooks/pre-merge-commit
   out="$("$labgate" audit 2>&1)" && fail "drifted repo should fail audit"
-  for want in 'worktree without handoff: feature' 'handoff without worktree: ghost' PLAN.md NOTES.md CONTRIBUTING.md 'merge commits' 'hooks missing'; do
+  for want in 'worktree without handoff: feature' 'handoff without worktree: ghost' PLAN.md NOTES.md CONTRIBUTING.md 'without a Promoted-from trailer' drift 'hooks missing'; do
     grep -q "$want" <<<"$out" || fail "did not report: $want"$'\n'"$out"
   done
+  git config --unset branch.main.mergeOptions
+  branch sneaky; printf 's\n' >> README.md; commit 'messy 1'; git checkout -q main
+  git merge -q sneaky   # fast-forward: no hook can see it
+  grep -q 'messy 1' <<<"$("$labgate" audit 2>&1)" || fail "fast-forwarded commit not reported"
+  git config branch.main.mergeOptions --no-ff
   git checkout -qb other; printf 'x\n' > wip.md; git add -A; git commit -qm other
   out="$("$labgate" audit 2>&1)" || true
   grep -q "main checkout is on 'other', not main" <<<"$out" || fail "did not report the checkout being off main"
   ! grep -q wip.md <<<"$out" || fail "audit judged the checked-out branch instead of main"
   git checkout -q main
   git config labgate.since "$(git rev-parse main)"
-  ! grep -q 'merge commits' <<<"$("$labgate" audit 2>&1)" || fail "merge before labgate.since reported"
+  ! grep -q 'Promoted-from' <<<"$("$labgate" audit 2>&1)" || fail "commits before labgate.since reported"
+  branch good; printf 'g\n' >> README.md; commit good; promote good
+  ! grep -q 'Promoted-from' <<<"$("$labgate" audit 2>&1)" || fail "a promotion with the trailer was reported"
 }
 
 test_close() {

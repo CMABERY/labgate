@@ -80,12 +80,19 @@ cmd_init() {
   render "$templates/handoff.md" > "$lab/handoff/TEMPLATE.md"
   if [[ ! -e "$root/AGENTS.md" ]]; then
     render "$templates/repo.AGENTS.md" > "$root/AGENTS.md"
-    say "installed $root/AGENTS.md; commit it with: LABGATE_PROMOTE=1 git commit"
+    say "installed $root/AGENTS.md; commit it with:"
+    say "  git add AGENTS.md && LABGATE_PROMOTE=1 git commit -m 'Add labgate rules' -m 'Promoted-from: init'"
   fi
   mkdir -p "$common/info"
   grep -qsx '.worktrees/' "$common/info/exclude" || printf '.worktrees/\n' >> "$common/info/exclude"
   git config --get labgate.base  >/dev/null || git config labgate.base "$base"
   [[ -n "$(git config --get labgate.since || true)" ]] || git config labgate.since "$(git rev-parse --verify -q "$base" || true)"
+  # A fast-forward merge creates no commit and so meets no hook; force a merge commit.
+  if [[ -z "$(git config --get "branch.$base.mergeOptions" || true)" ]]; then
+    git config "branch.$base.mergeOptions" --no-ff
+  elif ! git config --get "branch.$base.mergeOptions" | grep -q -- --no-ff; then
+    say "branch.$base.mergeOptions is already set; fast-forward merges into $base are not blocked (audit still sees them)"
+  fi
   install_hook
   say "ok: $name and $lab (base: $base)"
 }
@@ -133,9 +140,13 @@ cmd_audit() {
 
   printf '%s\n' "$tree" | grep -q '^\.worktrees/' && { echo ".worktrees/ is tracked on $base"; fail=1; }
 
+  # Every commit on base since init must be a promotion, recognised by the
+  # Promoted-from trailer that PROMOTE.md step 5 writes.
   since="$(git config --get labgate.since || true)"
-  hit="$(git -C "$root" log --first-parent --merges --oneline ${since:+"$since.."}"$base" 2>/dev/null || true)"
-  [[ -n "$hit" ]] && { echo "merge commits on $base since labgate init (promotions are squashes):"; echo "$hit"; fail=1; }
+  hit="$(git -C "$root" log -z --first-parent --format='%h %s%n%(trailers:key=Promoted-from,valueonly)' \
+           ${since:+"$since.."}"$base" 2>/dev/null \
+         | awk 'BEGIN{RS="\0"} {split($0,L,"\n"); if (L[2] !~ /[^ \t]/) print L[1]}' || true)"
+  [[ -n "$hit" ]] && { echo "commits on $base since labgate init without a Promoted-from trailer (not promotions):"; echo "$hit"; fail=1; }
 
   while IFS= read -r wt; do
     b="${wt#"$root/.worktrees/"}"
