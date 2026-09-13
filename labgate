@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# labgate — keep a project's progression out of its product.
+#
+#   labgate init                    create <repo>.lab beside this repo and install the rules
+#   labgate check <branch> [max]    fail if <branch> adds scaffolding relative to the base branch
+#
+# The base branch is main; override with LABGATE_BASE. max defaults to 600 added lines.
+set -euo pipefail
+
+here="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+templates="$here/templates"
+base="${LABGATE_BASE:-main}"
+
+die() { printf 'labgate: %s\n' "$*" >&2; exit 1; }
+
+usage() {
+  cat >&2 <<'EOF'
+usage:
+  labgate init                    create <repo>.lab beside this repo and install the rules
+  labgate check <branch> [max]    fail if <branch> adds scaffolding relative to the base branch
+EOF
+  exit 2
+}
+
+# The main checkout's .git directory, correct even when run inside a worktree.
+git_common() {
+  local d
+  d="$(git rev-parse --git-common-dir 2>/dev/null)" || die "not inside a git repository"
+  readlink -f "$d"
+}
+
+# render <template> <name>: substitute {{NAME}}.
+render() {
+  local safe
+  safe="$(printf '%s' "$2" | sed 's/[&\/]/\\&/g')"
+  sed "s/{{NAME}}/$safe/g" "$1"
+}
+
+cmd_init() {
+  local common root name lab
+  common="$(git_common)"
+  root="$(dirname "$common")"
+  name="$(basename "$root")"
+  lab="$(dirname "$root")/$name.lab"
+  [[ -e "$lab" ]] && die "$lab already exists"
+
+  mkdir -p "$lab"/{handoff,notes,plans,experiments,runs,prompts}
+  render "$templates/lab.AGENTS.md" "$name" > "$lab/AGENTS.md"
+  render "$templates/PROMOTE.md"    "$name" > "$lab/PROMOTE.md"
+  render "$templates/handoff.md"    "$name" > "$lab/handoff/TEMPLATE.md"
+  git -C "$lab" init -q -b main
+
+  if [[ -e "$root/AGENTS.md" ]]; then
+    printf 'kept existing %s; the outer rules are in %s\n' "$root/AGENTS.md" "$templates/repo.AGENTS.md"
+  else
+    render "$templates/repo.AGENTS.md" "$name" > "$root/AGENTS.md"
+    printf 'installed %s\n' "$root/AGENTS.md"
+  fi
+
+  mkdir -p "$common/info"
+  grep -qsx '.worktrees/' "$common/info/exclude" || printf '.worktrees/\n' >> "$common/info/exclude"
+
+  printf 'lab: %s\n' "$lab"
+}
+
+cmd_check() {
+  local branch="${1:-}" max="${2:-600}" range added hit lines fail=0
+  [[ -n "$branch" ]] || usage
+  git rev-parse --verify -q "$branch" >/dev/null || die "no such branch: $branch"
+  git rev-parse --verify -q "$base"   >/dev/null || die "no base branch: $base (set LABGATE_BASE)"
+  range="$base...$branch"
+  added="$(git diff --name-only --diff-filter=A "$range")"
+
+  hit="$(printf '%s\n' "$added" \
+    | grep -Ei '(^|/)(plan|notes?|todo|changelog|scratch|debug|probe|tmp|wip|old|backup|copy)([^a-z]|$)' || true)"
+  [[ -n "$hit" ]] && { echo "scaffolding-named files:"; echo "$hit"; fail=1; }
+
+  hit="$(comm -23 <(printf '%s\n' "$added" | grep / | cut -d/ -f1 | sort -u || true) \
+                  <(git ls-tree --name-only "$base" | sort))"
+  [[ -n "$hit" ]] && { echo "new top-level directories:"; echo "$hit"; fail=1; }
+
+  hit="$(printf '%s\n' "$added" | grep -E '\.md$' | grep -vx 'README.md' || true)"
+  [[ -n "$hit" ]] && { echo "markdown other than README.md:"; echo "$hit"; fail=1; }
+
+  lines="$(git diff --shortstat "$range" | grep -oE '[0-9]+ insertion' | grep -oE '^[0-9]+' || echo 0)"
+  (( lines > max )) && { echo "added $lines lines (> $max)"; fail=1; }
+
+  (( fail )) && exit 1
+  echo "ok: $branch adds no scaffolding relative to $base"
+}
+
+case "${1:-}" in
+  init)  shift; cmd_init "$@" ;;
+  check) shift; cmd_check "$@" ;;
+  *)     usage ;;
+esac
