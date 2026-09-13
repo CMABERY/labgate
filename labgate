@@ -172,11 +172,19 @@ cmd_check() {
   range="$base...$branch"
   added="$(git diff --name-only --diff-filter=A "$range")"
 
+  # The template's "<...>" lines define the handoff: none may survive verbatim,
+  # and each of their "Field:" prefixes must be present with something after it.
   handoff="$lab/handoff/$branch.md"
   if [[ ! -f "$handoff" ]]; then
     echo "no handoff: $handoff (copy $lab/handoff/TEMPLATE.md and fill it in)"; fail=1
-  elif grep -Fxq -f <(grep '<' "$lab/handoff/TEMPLATE.md" | grep -v '^#') "$handoff"; then
-    echo "handoff still contains unfilled template lines: $handoff"; fail=1
+  else
+    if grep -Fxq -f <(grep '<' "$lab/handoff/TEMPLATE.md" | grep -v '^#') "$handoff"; then
+      echo "handoff still contains unfilled template lines: $handoff"; fail=1
+    fi
+    while IFS= read -r field; do
+      awk -v f="$field" 'index($0,f)==1 && substr($0,length(f)+1) ~ /[^ \t]/ {ok=1} END {exit !ok}' "$handoff" \
+        || { echo "handoff field missing or empty: $field"; fail=1; }
+    done < <(grep '<' "$lab/handoff/TEMPLATE.md" | grep -v '^#' | grep -o '^[^:<]*:' || true)
   fi
 
   hit="$(printf '%s\n' "$added" | grep -Ei "$scaffold" || true)"

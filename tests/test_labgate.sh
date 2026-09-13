@@ -151,6 +151,12 @@ test_check() {
   cp "$lab/handoff/TEMPLATE.md" "$lab/handoff/messy.md"
   out="$("$labgate" check messy 2>&1)" && fail "unfilled handoff should fail"
   grep -q 'unfilled template lines' <<<"$out" || fail "did not report the unfilled handoff"
+  printf '# handoff: messy\n' > "$lab/handoff/messy.md"
+  out="$("$labgate" check messy 2>&1)" && fail "emptied handoff should fail"
+  grep -q 'field missing or empty: Behavior change:' <<<"$out" || fail "did not report the emptied handoff"
+  printf '# handoff: messy\nBehavior change: x.\nScaffolding left on the branch: none.\nUncertain: nothing.\nREADME.md: unchanged.\nVerified:   \n' > "$lab/handoff/messy.md"
+  out="$("$labgate" check messy 2>&1)" && fail "blank field should fail"
+  grep -q 'field missing or empty: Verified:' <<<"$out" || fail "did not report the blank field"
 
   branch clean
   printf 'print(3)\n' >> tool.py; printf 'c\n' > copyright.txt; printf 'l\n' > LICENSE.md

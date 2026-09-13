@@ -49,8 +49,8 @@ commits with `LABGATE_PROMOTE=1`.
 `check` lists its findings and exits 1 when, relative to the base branch, the
 branch has any of:
 
-- no handoff at `<lab>/handoff/<branch>.md`, or one that still contains lines
-  from the template
+- no handoff at `<lab>/handoff/<branch>.md`, one that still contains lines
+  from the template, or one missing any of the template's fields
 - added files named plan, note(s), todo, changelog, scratch, debug, probe, tmp,
   wip, old, backup or copy, with any extension or suffix after a non-letter
 - new top-level directories
