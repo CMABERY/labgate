@@ -7,7 +7,7 @@ gated, squash-merged promotions.
 ## What's included
 
 ```
-labgate                  executable: `init` and `check`
+labgate                  executable: `init`, `start` and `check`
 templates/
   repo.AGENTS.md         outer rules, installed as <repo>/AGENTS.md
   lab.AGENTS.md          inner rules, installed as <repo>.lab/AGENTS.md
@@ -27,12 +27,16 @@ cd ~/projects/foo        # an existing git repo
 labgate init             # creates ../foo.lab, installs AGENTS.md, excludes .worktrees/,
                          # records the base branch; safe to re-run
 
-git worktree add .worktrees/feature -b feature main
-# build in the worktree; finish by writing ../../../foo.lab/handoff/feature.md
+labgate start feature    # worktree at .worktrees/feature + ../foo.lab/handoff/feature.md
+# build in the worktree; finish by filling in the handoff
 
 labgate check feature    # exit 1 if the branch is not ready to promote
+                         # (every command takes -C <dir> to run from elsewhere)
 # then follow ../foo.lab/PROMOTE.md in a fresh session
 ```
+
+`init` never overwrites an `AGENTS.md`. It always refreshes the lab's
+`PROMOTE.md` and `handoff/TEMPLATE.md`, which labgate owns.
 
 `check` lists its findings and exits 1 when, relative to the base branch, the
 branch has any of:

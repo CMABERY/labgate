@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 # labgate — keep a project's progression out of its product.
 #
-#   labgate init                    create <repo>.lab beside this repo and install the rules (idempotent)
-#   labgate check <branch> [max]    fail if <branch> is not ready to promote
+#   labgate [-C <dir>] init                    create <repo>.lab beside this repo and install the rules (idempotent)
+#   labgate [-C <dir>] start <branch>          new worktree at .worktrees/<branch> plus a handoff to fill in
+#   labgate [-C <dir>] check <branch> [max]    fail if <branch> is not ready to promote
 #
+# -C runs as if started in <dir> (anywhere inside the repo or one of its worktrees).
 # Base branch: LABGATE_BASE, else git config labgate.base (set by init), else main.
 # max defaults to 600 added lines.
 set -euo pipefail
 
-here="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
-templates="$here/templates"
+self="$(readlink -f "$0")"
+templates="$(dirname "$self")/templates"
 
 scaffold='(^|/)(plan|notes?|todo|changelog|scratch|debug|probe|tmp|wip|old|backup|copy)([^a-z]|$)'
 # Bracketed so that this line does not match itself.
@@ -21,8 +23,9 @@ say() { printf '%s\n' "$*"; }
 usage() {
   cat >&2 <<'EOF'
 usage:
-  labgate init                    create <repo>.lab beside this repo and install the rules (idempotent)
-  labgate check <branch> [max]    fail if <branch> is not ready to promote
+  labgate [-C <dir>] init                    create <repo>.lab beside this repo and install the rules (idempotent)
+  labgate [-C <dir>] start <branch>          new worktree at .worktrees/<branch> plus a handoff to fill in
+  labgate [-C <dir>] check <branch> [max]    fail if <branch> is not ready to promote
 EOF
   exit 2
 }
@@ -47,19 +50,23 @@ locate() {
 
 esc() { printf '%s' "$1" | sed 's/[&\/]/\\&/g'; }
 
-# render <template>: substitute {{NAME}} and {{BASE}}.
-render() { sed -e "s/{{NAME}}/$(esc "$name")/g" -e "s/{{BASE}}/$(esc "$base")/g" "$1"; }
+# render <template>: substitute {{NAME}}, {{BASE}}, {{LAB}} and {{LABGATE}}.
+render() {
+  sed -e "s/{{NAME}}/$(esc "$name")/g" -e "s/{{BASE}}/$(esc "$base")/g" \
+      -e "s/{{LAB}}/$(esc "$lab")/g"   -e "s/{{LABGATE}}/$(esc "$self")/g" "$1"
+}
 
 cmd_init() {
   locate
   if [[ ! -d "$lab" ]]; then
     mkdir -p "$lab"/{handoff,notes,plans,experiments,runs,prompts}
     render "$templates/lab.AGENTS.md" > "$lab/AGENTS.md"
-    render "$templates/PROMOTE.md"    > "$lab/PROMOTE.md"
-    render "$templates/handoff.md"    > "$lab/handoff/TEMPLATE.md"
     git -C "$lab" init -q -b main
     say "created $lab"
   fi
+  # Procedure files are owned by labgate and refreshed on every init; AGENTS.md files are not.
+  render "$templates/PROMOTE.md" > "$lab/PROMOTE.md"
+  render "$templates/handoff.md" > "$lab/handoff/TEMPLATE.md"
   if [[ ! -e "$root/AGENTS.md" ]]; then
     render "$templates/repo.AGENTS.md" > "$root/AGENTS.md"
     say "installed $root/AGENTS.md; commit it"
@@ -69,6 +76,21 @@ cmd_init() {
   git config --get labgate.base  >/dev/null || git config labgate.base "$base"
   git config --get labgate.since >/dev/null || git config labgate.since "$(git rev-parse --verify -q "$base" || true)"
   say "ok: $name and $lab (base: $base)"
+}
+
+cmd_start() {
+  locate
+  local branch="${1:-}" wt handoff
+  [[ -n "$branch" ]] || usage
+  [[ "$branch" != */* ]] || die "branch names containing / are not supported"
+  [[ -d "$lab" ]] || die "no lab at $lab; run labgate init first"
+  wt="$root/.worktrees/$branch"
+  [[ ! -e "$wt" ]] || die "$wt already exists"
+  git -C "$root" worktree add -q "$wt" -b "$branch" "$base"
+  handoff="$lab/handoff/$branch.md"
+  [[ -e "$handoff" ]] || sed "s/<branch>/$(esc "$branch")/" "$lab/handoff/TEMPLATE.md" > "$handoff"
+  say "worktree: $wt"
+  say "handoff:  $handoff"
 }
 
 cmd_check() {
@@ -83,8 +105,8 @@ cmd_check() {
   handoff="$lab/handoff/$branch.md"
   if [[ ! -f "$handoff" ]]; then
     echo "no handoff: $handoff (copy $lab/handoff/TEMPLATE.md and fill it in)"; fail=1
-  elif grep -Fxq -f <(grep -Ev '^(#|$)' "$lab/handoff/TEMPLATE.md") "$handoff"; then
-    echo "handoff still contains template lines: $handoff"; fail=1
+  elif grep -Fxq -f <(grep '<' "$lab/handoff/TEMPLATE.md" | grep -v '^#') "$handoff"; then
+    echo "handoff still contains unfilled template lines: $handoff"; fail=1
   fi
 
   hit="$(printf '%s\n' "$added" | grep -Ei "$scaffold" || true)"
@@ -112,8 +134,13 @@ cmd_check() {
   echo "ok: $branch is ready to promote onto $base"
 }
 
+if [[ "${1:-}" == -C ]]; then
+  cd "${2:?-C needs a directory}" || die "cannot cd to $2"
+  shift 2
+fi
 case "${1:-}" in
   init)  shift; cmd_init "$@" ;;
+  start) shift; cmd_start "$@" ;;
   check) shift; cmd_check "$@" ;;
   *)     usage ;;
 esac

@@ -35,12 +35,31 @@ test_init() {
   [[ $(git config labgate.since) == $(git rev-parse main~1) ]] || fail "labgate.since is not the init-time head"
 
   printf 'custom\n' >> "$lab/AGENTS.md"
+  printf 'custom\n' >> "$lab/PROMOTE.md"
   "$labgate" init >/dev/null
-  grep -q custom "$lab/AGENTS.md" || fail "re-init clobbered the lab"
+  grep -q custom "$lab/AGENTS.md" || fail "re-init clobbered the lab AGENTS.md"
+  ! grep -q custom "$lab/PROMOTE.md" || fail "re-init did not refresh PROMOTE.md"
+  grep -q "$labgate" "$lab/PROMOTE.md" || fail "{{LABGATE}} not substituted"
+  grep -q "$lab" "$lab/PROMOTE.md" || fail "{{LAB}} not substituted"
 
   git worktree add -q .worktrees/wt -b wt main
   ( cd .worktrees/wt && "$labgate" init >/dev/null ) || fail "init from a worktree"
+  ( cd / && "$labgate" -C "$repo/.worktrees/wt" init >/dev/null ) || fail "-C ignored"
+  ! ( cd / && "$labgate" init 2>/dev/null ) || fail "outside a repo should fail"
   [[ ! -e $repo/.worktrees/wt.lab ]] || fail "init from a worktree resolved the wrong root"
+}
+
+test_start() {
+  fresh
+  out="$("$labgate" start feature)" || fail "start failed: $out"
+  [[ -d .worktrees/feature ]] || fail "no worktree"
+  [[ $(git -C .worktrees/feature symbolic-ref --short HEAD) == feature ]] || fail "worktree is not on the branch"
+  grep -q '^# handoff: feature$' "$lab/handoff/feature.md" || fail "handoff not created from the template"
+  ! "$labgate" start feature 2>/dev/null || fail "duplicate start should refuse"
+  ! "$labgate" start feat/x 2>/dev/null || fail "slash in branch name should refuse"
+  ! "$labgate" check feature >/dev/null 2>&1 || fail "unfilled handoff from start should fail check"
+  rm -rf "$lab"
+  ! "$labgate" start other 2>/dev/null || fail "start without a lab should refuse"
 }
 
 test_check() {
@@ -55,7 +74,7 @@ test_check() {
   done
   cp "$lab/handoff/TEMPLATE.md" "$lab/handoff/messy.md"
   out="$("$labgate" check messy 2>&1)" && fail "unfilled handoff should fail"
-  grep -q 'template lines' <<<"$out" || fail "did not report the unfilled handoff"
+  grep -q 'unfilled template lines' <<<"$out" || fail "did not report the unfilled handoff"
 
   branch clean
   printf 'print(3)\n' >> tool.py; printf 'c\n' > copyright.txt; printf 'l\n' > LICENSE.md

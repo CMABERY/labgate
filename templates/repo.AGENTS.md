@@ -10,8 +10,8 @@ The lab is `{{NAME}}.lab/`, a sibling of this repo's main checkout:
 - No new files unless the task cannot be done in an existing one.
 - No new top-level directories. No dependencies without asking.
 - Replace ⇒ delete what was replaced. Update `README.md` in the same change.
-- Work only in `.worktrees/<branch>`. Never edit `{{BASE}}` directly.
-- A session is not finished until `<lab>/handoff/<branch>.md` is filled in
-  (template: `<lab>/handoff/TEMPLATE.md`) and `labgate check <branch>` reports
-  nothing you cannot justify in the handoff.
+- Work only in `.worktrees/<branch>`; `labgate start <branch>` creates it and
+  a handoff to fill in. Never edit `{{BASE}}` directly.
+- A session is not finished until `<lab>/handoff/<branch>.md` is filled in and
+  `labgate check <branch>` reports nothing you cannot justify in the handoff.
 - Promotion to `{{BASE}}` is a separate session: `<lab>/PROMOTE.md`.
