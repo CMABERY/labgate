@@ -17,8 +17,11 @@ templates/
 tests/test_labgate.sh    exercises every subcommand in throwaway repos
 ```
 
-Requires bash, git ≥ 2.31 and a GNU or BSD userland (grep, sed, comm, find).
-Nothing else.
+Requires bash, git ≥ 2.31 and a GNU or BSD userland (grep, sed, awk, comm,
+find). Nothing else. The repo root is taken to be the parent of the common
+git directory, which is wrong for submodules and `GIT_DIR`-relocated repos;
+those are unsupported. `PROMOTE.md` carries absolute paths: re-run `init`
+after moving labgate or a lab.
 
 ## Usage
 
@@ -51,17 +54,23 @@ branch has any of:
 
 - no handoff at `<lab>/handoff/<branch>.md`, one that still contains lines
   from the template, or one missing any of the template's fields
-- added files named plan, note(s), todo, changelog, scratch, debug, probe, tmp,
-  wip, old, backup or copy, with any extension or suffix after a non-letter
+- added files or directories named plan(s), note(s), todo(s), changelog,
+  scratch, debug, probe(s), tmp, wip, old, backup(s), copy/copies,
+  experiment(s) or runs, at any depth, with any extension or suffix after a
+  non-letter
 - new top-level directories
 - new top-level markdown other than `README.md`, `AGENTS.md` or `LICENSE*`
-- added lines in non-markdown files containing TODO, FIXME, XXX, HACK, DEBUG,
-  `breakpoint()`, `pdb`, `debugger` or `console.debug`
+- added lines in non-markdown files containing TODO, FIXME, XXX, HACK,
+  `debugger`, `breakpoint()`, `import pdb`, `pdb.<anything>`, `console.debug`,
+  or DEBUG as a comment or string (`# DEBUG`, `"DEBUG"`; not `logging.DEBUG`
+  or `#ifdef DEBUG`)
 - more than 600 added lines (second argument overrides)
 
 It also notes, without failing, a branch that removes nothing. Apart from the
 handoff, these are look-twice triggers, not laws: the promoter deletes, or
-justifies the finding in the decision note.
+justifies the finding in the decision note. A repo that legitimately keeps,
+say, `CONTRIBUTING.md` records that in its own `AGENTS.md`; there is no
+exemption config, on purpose.
 
 The base branch is `LABGATE_BASE` if set, else `git config labgate.base`
 (recorded by `init`), else `main`, else `master`.

@@ -22,9 +22,12 @@ done
 self="$(cd "$(dirname "$self")" && pwd -P)/$(basename "$self")"
 templates="$(dirname "$self")/templates"
 
-scaffold='(^|/)(plan|notes?|todo|changelog|scratch|debug|probe|tmp|wip|old|backup|copy)([^a-z]|$)'
-# Bracketed so that this line does not match itself.
-markers='(^|[^A-Za-z_])(T[O]DO|F[I]XME|X[X]X|H[A]CK|D[E]BUG|d[e]bugger)([^A-Za-z_]|$)|breakpoint\(\)|pdb\.set_trace|import p[d]b|console\.debug'
+scaffold='(^|/)(plans?|notes?|todos?|changelog|scratch|debug|probes?|tmp|wip|old|backups?|copy|copies|experiments?|runs)([^a-z]|$)'
+# Bracketed so that these lines do not match themselves. DEBUG counts only as a
+# comment or string marker; logging.DEBUG and #ifdef DEBUG are product code.
+markers='(^|[^A-Za-z_])(T[O]DO|F[I]XME|X[X]X|H[A]CK|d[e]bugger)([^A-Za-z_]|$)'
+markers+='|(#|//|/\*|"|'"'"')[[:blank:]]*D[E]BUG([^A-Za-z_]|$)'
+markers+='|breakpoint\(\)|(^|[^A-Za-z_.])p[d]b\.|import p[d]b|console\.debug'
 
 die() { printf 'labgate: %s\n' "$*" >&2; exit 1; }
 say() { printf '%s\n' "$*"; }
@@ -68,6 +71,7 @@ render() {
 }
 
 cmd_init() {
+  [[ $# -eq 0 ]] || usage
   locate
   if [[ ! -d "$lab" ]]; then
     mkdir -p "$lab"/{handoff,notes,plans,experiments,runs,prompts}
@@ -84,7 +88,7 @@ cmd_init() {
     say "  git add AGENTS.md && LABGATE_PROMOTE=1 git commit -m 'Add labgate rules' -m 'Promoted-from: init'"
   fi
   mkdir -p "$common/info"
-  grep -qsx '.worktrees/' "$common/info/exclude" || printf '.worktrees/\n' >> "$common/info/exclude"
+  grep -qsxF '.worktrees/' "$common/info/exclude" || printf '.worktrees/\n' >> "$common/info/exclude"
   git config --get labgate.base  >/dev/null || git config labgate.base "$base"
   [[ -n "$(git config --get labgate.since || true)" ]] || git config labgate.since "$(git rev-parse --verify -q "$base" || true)"
   # A fast-forward merge creates no commit and so meets no hook; force a merge commit.
@@ -119,6 +123,7 @@ install_hook() {
 hook_ok() { [[ -x "$common/hooks/$1" ]] && grep -q 'Installed by labgate' "$common/hooks/$1"; }
 
 cmd_audit() {
+  [[ $# -eq 0 ]] || usage
   locate
   local fail=0 hit since wt b h head tree
   git rev-parse --verify -q "$base" >/dev/null || die "no base branch: $base"
@@ -127,7 +132,7 @@ cmd_audit() {
   tree="$(git -C "$root" ls-tree -r --name-only "$base")"
   [[ -d "$lab" ]] || { echo "no lab at $lab (run labgate init)"; fail=1; }
   [[ -e "$root/AGENTS.md" ]] || { echo "no $root/AGENTS.md (run labgate init)"; fail=1; }
-  grep -qsx '.worktrees/' "$common/info/exclude" || { echo ".worktrees/ not excluded (run labgate init)"; fail=1; }
+  grep -qsxF '.worktrees/' "$common/info/exclude" || { echo ".worktrees/ not excluded (run labgate init)"; fail=1; }
   if [[ -z "$(git config --get core.hooksPath || true)" ]]; then
     hook_ok pre-commit && hook_ok pre-merge-commit || { echo "labgate hooks missing (run labgate init)"; fail=1; }
   fi
@@ -165,9 +170,9 @@ cmd_audit() {
 cmd_start() {
   locate
   local branch="${1:-}" wt handoff
-  [[ -n "$branch" ]] || usage
+  [[ $# -eq 1 && -n "$branch" ]] || usage
   [[ "$branch" != */* ]] || die "branch names containing / are not supported"
-  [[ -d "$lab" ]] || die "no lab at $lab; run labgate init first"
+  [[ -f "$lab/handoff/TEMPLATE.md" ]] || die "no $lab/handoff/TEMPLATE.md; run labgate init first"
   wt="$root/.worktrees/$branch"
   [[ ! -e "$wt" ]] || die "$wt already exists"
   git -C "$root" worktree add -q "$wt" -b "$branch" "$base"
@@ -180,7 +185,8 @@ cmd_start() {
 cmd_check() {
   locate
   local branch="${1:-}" max="${2:-600}" range added handoff hit f n fail=0
-  [[ -n "$branch" ]] || usage
+  [[ $# -ge 1 && $# -le 2 && -n "$branch" ]] || usage
+  [[ "$max" =~ ^[0-9]+$ ]] || die "max must be a whole number of lines, not '$max'"
   git rev-parse --verify -q "$branch" >/dev/null || die "no such branch: $branch"
   git rev-parse --verify -q "$base"   >/dev/null || die "no base branch: $base (set LABGATE_BASE or git config labgate.base)"
   range="$base...$branch"
@@ -231,7 +237,7 @@ cmd_check() {
 cmd_close() {
   locate
   local branch="${1:-}" wt handoff receipt elsewhere
-  [[ -n "$branch" ]] || usage
+  [[ $# -eq 1 && -n "$branch" ]] || usage
   wt="$root/.worktrees/$branch"; handoff="$lab/handoff/$branch.md"
   receipt="$(find "$lab/notes" -maxdepth 1 -name "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-$branch.md" 2>/dev/null | sort | tail -n 1)"
   [[ -n "$receipt" ]] || die "no decision note $lab/notes/YYYY-MM-DD-$branch.md; write it (PROMOTE.md step 7) before closing"

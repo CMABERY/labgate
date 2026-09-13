@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # Installed by labgate init. The base branch only receives promotions.
 [[ -n "${LABGATE_PROMOTE:-}" ]] && exit 0
-base="${LABGATE_BASE:-$(git config --get labgate.base || echo main)}"
+base="${LABGATE_BASE:-$(git config --get labgate.base || true)}"
+if [[ -z "$base" ]]; then
+  base=main
+  git rev-parse --verify -q main >/dev/null || ! git rev-parse --verify -q master >/dev/null || base=master
+fi
 [[ "$(git symbolic-ref --short -q HEAD)" == "$base" ]] || exit 0
 cat >&2 <<EOF
 labgate: '$base' only receives promotions.

@@ -28,6 +28,10 @@ test_invocation() {
   "$labgate" --help | grep -q '^usage:' || fail "--help should print usage on stdout and exit 0"
   ! "$labgate" >/dev/null 2>&1 || fail "no arguments should exit non-zero"
   fresh
+  ! "$labgate" init extra >/dev/null 2>&1 || fail "init with an argument accepted"
+  ! "$labgate" init -C /nonexistent >/dev/null 2>&1 || fail "-C after the subcommand accepted"
+  ! "$labgate" audit extra >/dev/null 2>&1 || fail "audit with an argument accepted"
+  fresh
   rm -rf "$lab"
   mkdir -p "$work/bin" "$work/bin2"
   ln -s "$labgate" "$work/bin/labgate"          # absolute symlink
@@ -109,6 +113,9 @@ test_start() {
   ! "$labgate" start feature 2>/dev/null || fail "duplicate start should refuse"
   ! "$labgate" start feat/x 2>/dev/null || fail "slash in branch name should refuse"
   ! "$labgate" check feature >/dev/null 2>&1 || fail "unfilled handoff from start should fail check"
+  rm "$lab/handoff/TEMPLATE.md"
+  ! "$labgate" start other 2>/dev/null || fail "start without a template should refuse"
+  [[ ! -e .worktrees/other ]] || fail "start left a worktree behind after refusing"
   rm -rf "$lab"
   ! "$labgate" start other 2>/dev/null || fail "start without a lab should refuse"
 }
@@ -169,12 +176,23 @@ test_check() {
   fresh
   branch messy
   printf 'x\n' > PLAN.md; mkdir utils; printf 'y\n' > utils/h.py; printf 'z\n' > scratch_probe.py
-  printf 'print(2)  # T''ODO\n' >> tool.py   # split so this line does not match itself
+  mkdir -p docs/plans src/experiments runs; printf 'a\n' > docs/plans/a.md; printf 'e\n' > src/experiments/e.py; printf 'r\n' > runs/1.txt
+  printf 'r\n' > run.sh; printf 'p\n' > prompts.txt
+  printf 'print(2)  # T''ODO\n' >> tool.py   # split so these lines do not match themselves
+  printf 'print("D''EBUG", x)\n' >> tool.py
+  printf 'p''db.run("x")\n' >> tool.py
+  printf 'logging.basicConfig(level=logging.D''EBUG)\n' >> tool.py
+  printf '#ifdef D''EBUG\n' >> tool.py
   commit messy
   out="$("$labgate" check messy 3 2>&1)" && fail "messy branch should fail"
-  for want in 'no handoff' PLAN.md scratch_probe.py utils 'markers in tool.py' 'adds 4 lines'; do
+  for want in 'no handoff' PLAN.md scratch_probe.py utils 'markers in tool.py' 'adds 13 lines' docs/plans/a.md src/experiments/e.py runs/1.txt 'print("D''EBUG"' 'p''db.run'; do
     grep -q "$want" <<<"$out" || fail "did not report: $want"$'\n'"$out"
   done
+  for nope in run.sh prompts.txt 'logging.D''EBUG' '#ifdef'; do
+    ! grep -q "$nope" <<<"$out" || fail "false positive: $nope"$'\n'"$out"
+  done
+  ! "$labgate" check messy 1x >/dev/null 2>&1 || fail "non-numeric max accepted"
+  ! "$labgate" check messy 3 extra >/dev/null 2>&1 || fail "extra argument accepted"
   cp "$lab/handoff/TEMPLATE.md" "$lab/handoff/messy.md"
   out="$("$labgate" check messy 2>&1)" && fail "unfilled handoff should fail"
   grep -q 'unfilled template lines' <<<"$out" || fail "did not report the unfilled handoff"
