@@ -14,7 +14,7 @@ templates/
   PROMOTE.md             the promotion procedure, installed into the lab
   handoff.md             builder → promoter declaration, installed as handoff/TEMPLATE.md
   pre-commit             installed as .git/hooks/pre-commit and pre-merge-commit: base = promotions only
-tests/test_labgate.sh    exercises init and check in a throwaway repo
+tests/test_labgate.sh    exercises every subcommand in throwaway repos
 ```
 
 Requires bash, git ≥ 2.31 and a GNU or BSD userland (grep, sed, comm, find).
