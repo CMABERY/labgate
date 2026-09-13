@@ -59,14 +59,17 @@ test_hook() {
   printf 'y\n' >> README.md
   git commit -qam 'on a branch' || fail "commit on a branch refused"
   git checkout -q main
+  ! git merge -q --no-ff side 2>/dev/null || fail "merge into main should be refused"
+  git merge --abort 2>/dev/null || true
+  LABGATE_PROMOTE=1 git merge -q --no-ff side || fail "LABGATE_PROMOTE=1 merge refused"
 
   printf '#!/bin/sh\nexit 0\n' > .git/hooks/pre-commit
   "$labgate" init >/dev/null
   ! grep -q 'Installed by labgate' .git/hooks/pre-commit || fail "foreign hook overwritten"
-  rm .git/hooks/pre-commit
+  rm .git/hooks/pre-commit .git/hooks/pre-merge-commit
   git config core.hooksPath "$work/hooks"
   "$labgate" init >/dev/null
-  [[ ! -e .git/hooks/pre-commit ]] || fail "hook installed despite core.hooksPath"
+  [[ ! -e .git/hooks/pre-commit && ! -e .git/hooks/pre-merge-commit ]] || fail "hook installed despite core.hooksPath"
   git config --unset core.hooksPath
 }
 
@@ -81,6 +84,25 @@ test_start() {
   ! "$labgate" check feature >/dev/null 2>&1 || fail "unfilled handoff from start should fail check"
   rm -rf "$lab"
   ! "$labgate" start other 2>/dev/null || fail "start without a lab should refuse"
+}
+
+test_audit() {
+  fresh
+  "$labgate" audit >/dev/null || fail "fresh repo should pass audit"
+  "$labgate" start feature >/dev/null
+  rm "$lab/handoff/feature.md"
+  printf 'h\n' > "$lab/handoff/ghost.md"
+  printf 'x\n' > PLAN.md; printf 'n\n' > NOTES.md; printf 'c\n' > CONTRIBUTING.md
+  git add -A && LABGATE_PROMOTE=1 git commit -qm 'drift'
+  branch side; printf 'y\n' >> README.md; commit side; git checkout -q main
+  LABGATE_PROMOTE=1 git merge -q --no-ff side
+  rm .git/hooks/pre-merge-commit
+  out="$("$labgate" audit 2>&1)" && fail "drifted repo should fail audit"
+  for want in 'worktree without handoff: feature' 'handoff without worktree: ghost' PLAN.md NOTES.md CONTRIBUTING.md 'merge commits' 'hooks missing'; do
+    grep -q "$want" <<<"$out" || fail "did not report: $want"$'\n'"$out"
+  done
+  git config labgate.since "$(git rev-parse main)"
+  ! grep -q 'merge commits' <<<"$("$labgate" audit 2>&1)" || fail "merge before labgate.since reported"
 }
 
 test_close() {

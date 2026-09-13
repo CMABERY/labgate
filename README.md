@@ -7,13 +7,13 @@ gated, squash-merged promotions.
 ## What's included
 
 ```
-labgate                  executable: `init`, `start`, `check` and `close`
+labgate                  executable: `init`, `start`, `check`, `close` and `audit`
 templates/
   repo.AGENTS.md         outer rules, installed as <repo>/AGENTS.md
   lab.AGENTS.md          inner rules, installed as <repo>.lab/AGENTS.md
   PROMOTE.md             the promotion procedure, installed into the lab
   handoff.md             builder → promoter declaration, installed as handoff/TEMPLATE.md
-  pre-commit             hook installed into <repo>/.git/hooks: base branch = promotions only
+  pre-commit             installed as .git/hooks/pre-commit and pre-merge-commit: base = promotions only
 tests/test_labgate.sh    exercises init and check in a throwaway repo
 ```
 
@@ -36,6 +36,8 @@ labgate check feature    # exit 1 if the branch is not ready to promote
                          # (every command takes -C <dir> to run from elsewhere)
 # then follow ../foo.lab/PROMOTE.md in a fresh session, which ends with
 labgate close feature    # removes worktree, branch and handoff; needs the decision note
+
+labgate audit            # exit 1 if main has drifted from the model (run it whenever)
 ```
 
 `init` never overwrites an `AGENTS.md`. It always refreshes the lab's
@@ -63,12 +65,19 @@ justifies the finding in the decision note.
 The base branch is `LABGATE_BASE` if set, else `git config labgate.base`
 (recorded by `init`), else `main`, else `master`.
 
+`audit` applies the same taste to the main checkout instead of a branch:
+scaffolding-named or extra top-level markdown files tracked, `.worktrees/`
+tracked, merge commits on the base branch since `init` (promotions are
+squashes), worktrees without handoffs, handoffs without worktrees, and the
+lab, `AGENTS.md`, exclusion and hooks that `init` should have left behind. On a
+repo that predates labgate, its output is the migration list.
+
 ## What you get
 
 ```
 foo/                     product; main = one squash commit per promoted change
   AGENTS.md              outer rules (subtractive)
-  .git/hooks/pre-commit  refuses commits on main unless LABGATE_PROMOTE=1
+  .git/hooks/pre-commit  with pre-merge-commit: refuse commits on main unless LABGATE_PROMOTE=1
   .worktrees/<branch>/   where building happens; excluded via .git/info/exclude
 foo.lab/                 progression; its own git repo, never merged, never shipped
   AGENTS.md              inner rules (permissive)
@@ -93,6 +102,7 @@ Three zones, one boundary: the lab and `main` never touch directly.
 The sibling layout is deliberate. A directory outside the repo cannot be
 committed by accident, and agents launched from the repo do not see it.
 
-Watch for: commits on `main` that are not promotions (`git log --first-parent
-main` should read like a changelog), builder sessions that start polishing,
-and missing handoffs. Each means the wrong zone's rules were loaded.
+`labgate audit` catches the drift that leaves traces: non-promotion commits
+on `main`, missing handoffs, scaffolding that slipped through. It cannot see
+a builder session that started polishing; that one you notice when handoffs
+get thinner.
