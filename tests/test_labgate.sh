@@ -1,56 +1,86 @@
 #!/usr/bin/env bash
-# Exercises `labgate init` and `labgate check` in a throwaway repo.
+# Exercises labgate in throwaway repos.
 set -euo pipefail
 
 labgate="$(cd "$(dirname "$0")/.." && pwd)/labgate"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
+fail() { echo "FAIL ${FUNCNAME[1]}: $*" >&2; exit 1; }
 
-fail() { echo "FAIL: $*" >&2; exit 1; }
+# fresh: a committed repo at $repo with labgate initialised; leaves cwd inside it
+fresh() {
+  repo="$work/foo"; lab="$work/foo.lab"
+  rm -rf "$repo" "$lab"
+  git init -q -b main "$repo" && cd "$repo"
+  git config user.email test@example.com && git config user.name test
+  printf '# foo\n' > README.md
+  printf 'print(1)\n' > tool.py
+  git add -A && git commit -qm init
+  "$labgate" init >/dev/null
+  git add AGENTS.md && git commit -qm 'add outer rules'
+}
+branch()  { git checkout -q main && git checkout -qb "$1"; }
+commit()  { git add -A && git commit -qm "$1"; }
+handoff() { printf '# handoff: %s\nBehavior change: adds output.\nScaffolding left on the branch: none.\nUncertain: nothing.\nREADME.md: unchanged.\nVerified: tests.\n' "$1" > "$lab/handoff/$1.md"; }
 
-cd "$work"
-git init -q -b main foo && cd foo
-git config user.email test@example.com && git config user.name test
-printf '# foo\n' > README.md
-printf 'print(1)\n' > foo.py
-git add -A && git commit -qm init
+test_init() {
+  fresh
+  [[ -f $lab/AGENTS.md && -f $lab/PROMOTE.md && -f $lab/handoff/TEMPLATE.md ]] || fail "lab files missing"
+  [[ -d $lab/.git ]] || fail "lab is not a git repo"
+  grep -q 'foo.lab' "$lab/AGENTS.md" || fail "{{NAME}} not substituted"
+  grep -q 'foo.lab' AGENTS.md || fail "repo AGENTS.md not installed"
+  grep -q '`main`' AGENTS.md || fail "{{BASE}} not substituted"
+  grep -qx '.worktrees/' .git/info/exclude || fail ".worktrees/ not excluded"
+  [[ $(git config labgate.base) == main ]] || fail "labgate.base not set"
+  [[ $(git config labgate.since) == $(git rev-parse main~1) ]] || fail "labgate.since is not the init-time head"
 
-# init: lab sibling, its files, repo AGENTS.md, worktree exclusion; refuses to run twice
-"$labgate" init >/dev/null
-[[ -f ../foo.lab/AGENTS.md && -f ../foo.lab/PROMOTE.md && -f ../foo.lab/handoff/TEMPLATE.md ]] || fail "lab files missing"
-[[ -d ../foo.lab/.git ]] || fail "lab is not a git repo"
-grep -q 'foo.lab' ../foo.lab/AGENTS.md || fail "{{NAME}} not substituted in lab"
-[[ -f AGENTS.md ]] && grep -q 'foo.lab' AGENTS.md || fail "repo AGENTS.md not installed"
-grep -qx '.worktrees/' .git/info/exclude || fail ".worktrees/ not excluded"
-! "$labgate" init 2>/dev/null || fail "second init should refuse"
-git add AGENTS.md && git commit -qm 'add outer rules'
+  printf 'custom\n' >> "$lab/AGENTS.md"
+  "$labgate" init >/dev/null
+  grep -q custom "$lab/AGENTS.md" || fail "re-init clobbered the lab"
 
-# init from inside a worktree resolves the main checkout
-git worktree add -q .worktrees/wt -b wt main
-( cd .worktrees/wt && ! "$labgate" init 2>/dev/null ) || fail "init from worktree should see the existing lab"
+  git worktree add -q .worktrees/wt -b wt main
+  ( cd .worktrees/wt && "$labgate" init >/dev/null ) || fail "init from a worktree"
+  [[ ! -e $repo/.worktrees/wt.lab ]] || fail "init from a worktree resolved the wrong root"
+}
 
-# check: a messy branch trips every rule
-git checkout -qb messy
-printf 'x\n' > PLAN.md
-mkdir utils && printf 'y\n' > utils/h.py
-printf 'z\n' > scratch_probe.py
-printf 'print(2)\n' >> foo.py
-git add -A && git commit -qm wip
-out="$("$labgate" check messy 3 2>&1)" && fail "messy branch should fail"
-for want in PLAN.md scratch_probe.py utils 'added 4 lines'; do
-  grep -q "$want" <<<"$out" || fail "check did not report: $want"
-done
+test_check() {
+  fresh
+  branch messy
+  printf 'x\n' > PLAN.md; mkdir utils; printf 'y\n' > utils/h.py; printf 'z\n' > scratch_probe.py
+  printf 'print(2)  # T''ODO\n' >> tool.py   # split so this line does not match itself
+  commit messy
+  out="$("$labgate" check messy 3 2>&1)" && fail "messy branch should fail"
+  for want in 'no handoff' PLAN.md scratch_probe.py utils 'markers in tool.py' 'adds 4 lines'; do
+    grep -q "$want" <<<"$out" || fail "did not report: $want"$'\n'"$out"
+  done
+  cp "$lab/handoff/TEMPLATE.md" "$lab/handoff/messy.md"
+  out="$("$labgate" check messy 2>&1)" && fail "unfilled handoff should fail"
+  grep -q 'template lines' <<<"$out" || fail "did not report the unfilled handoff"
 
-# check: a clean branch passes; copyright.txt is not a "copy" file
-git checkout -q main && git checkout -qb clean
-printf 'print(3)\n' >> foo.py
-printf 'c\n' > copyright.txt
-git add -A && git commit -qm ok
-"$labgate" check clean >/dev/null || fail "clean branch should pass"
+  branch clean
+  printf 'print(3)\n' >> tool.py; printf 'c\n' > copyright.txt; printf 'l\n' > LICENSE.md
+  printf 'see T''ODO list\n' >> README.md
+  commit clean
+  handoff clean
+  out="$("$labgate" check clean 2>&1)" || fail "clean branch should pass:"$'\n'"$out"
+  grep -q 'removes nothing' <<<"$out" || fail "no removes-nothing note"
 
-# check: LABGATE_BASE
-git branch -m main trunk
-LABGATE_BASE=trunk "$labgate" check clean >/dev/null || fail "LABGATE_BASE not honoured"
-! "$labgate" check clean 2>/dev/null || fail "missing base branch should fail"
+  branch trim
+  sed -i '1d' tool.py
+  commit trim
+  handoff trim
+  out="$("$labgate" check trim 2>&1)" || fail "trim branch should pass:"$'\n'"$out"
+  ! grep -q 'removes nothing' <<<"$out" || fail "removes-nothing note on a branch that removes"
 
+  git branch -m main trunk
+  LABGATE_BASE=trunk "$labgate" check clean >/dev/null || fail "LABGATE_BASE ignored"
+  git config labgate.base trunk
+  "$labgate" check clean >/dev/null || fail "labgate.base ignored"
+  git config --unset labgate.base
+  ! "$labgate" check clean 2>/dev/null || fail "missing base branch should fail"
+  git branch -m trunk master
+  "$labgate" check clean >/dev/null || fail "master fallback ignored"
+}
+
+for t in $(declare -F | awk '$3 ~ /^test_/ {print $3}'); do "$t"; done
 echo ok

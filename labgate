@@ -1,92 +1,115 @@
 #!/usr/bin/env bash
 # labgate — keep a project's progression out of its product.
 #
-#   labgate init                    create <repo>.lab beside this repo and install the rules
-#   labgate check <branch> [max]    fail if <branch> adds scaffolding relative to the base branch
+#   labgate init                    create <repo>.lab beside this repo and install the rules (idempotent)
+#   labgate check <branch> [max]    fail if <branch> is not ready to promote
 #
-# The base branch is main; override with LABGATE_BASE. max defaults to 600 added lines.
+# Base branch: LABGATE_BASE, else git config labgate.base (set by init), else main.
+# max defaults to 600 added lines.
 set -euo pipefail
 
 here="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 templates="$here/templates"
-base="${LABGATE_BASE:-main}"
+
+scaffold='(^|/)(plan|notes?|todo|changelog|scratch|debug|probe|tmp|wip|old|backup|copy)([^a-z]|$)'
+# Bracketed so that this line does not match itself.
+markers='(^|[^A-Za-z_])(T[O]DO|F[I]XME|X[X]X|H[A]CK|D[E]BUG|d[e]bugger)([^A-Za-z_]|$)|breakpoint\(\)|pdb\.set_trace|import p[d]b|console\.debug'
 
 die() { printf 'labgate: %s\n' "$*" >&2; exit 1; }
+say() { printf '%s\n' "$*"; }
 
 usage() {
   cat >&2 <<'EOF'
 usage:
-  labgate init                    create <repo>.lab beside this repo and install the rules
-  labgate check <branch> [max]    fail if <branch> adds scaffolding relative to the base branch
+  labgate init                    create <repo>.lab beside this repo and install the rules (idempotent)
+  labgate check <branch> [max]    fail if <branch> is not ready to promote
 EOF
   exit 2
 }
 
-# The main checkout's .git directory, correct even when run inside a worktree.
-git_common() {
+# Resolve the layout from anywhere inside the repo, including a worktree:
+# common (.git dir), root (main checkout), name, lab, base.
+locate() {
   local d
   d="$(git rev-parse --git-common-dir 2>/dev/null)" || die "not inside a git repository"
-  readlink -f "$d"
-}
-
-# render <template> <name>: substitute {{NAME}}.
-render() {
-  local safe
-  safe="$(printf '%s' "$2" | sed 's/[&\/]/\\&/g')"
-  sed "s/{{NAME}}/$safe/g" "$1"
-}
-
-cmd_init() {
-  local common root name lab
-  common="$(git_common)"
+  common="$(readlink -f "$d")"
   root="$(dirname "$common")"
   name="$(basename "$root")"
   lab="$(dirname "$root")/$name.lab"
-  [[ -e "$lab" ]] && die "$lab already exists"
-
-  mkdir -p "$lab"/{handoff,notes,plans,experiments,runs,prompts}
-  render "$templates/lab.AGENTS.md" "$name" > "$lab/AGENTS.md"
-  render "$templates/PROMOTE.md"    "$name" > "$lab/PROMOTE.md"
-  render "$templates/handoff.md"    "$name" > "$lab/handoff/TEMPLATE.md"
-  git -C "$lab" init -q -b main
-
-  if [[ -e "$root/AGENTS.md" ]]; then
-    printf 'kept existing %s; the outer rules are in %s\n' "$root/AGENTS.md" "$templates/repo.AGENTS.md"
-  else
-    render "$templates/repo.AGENTS.md" "$name" > "$root/AGENTS.md"
-    printf 'installed %s\n' "$root/AGENTS.md"
+  base="${LABGATE_BASE:-$(git config --get labgate.base || true)}"
+  if [[ -z "$base" ]]; then
+    base=main
+    if ! git rev-parse --verify -q main >/dev/null && git rev-parse --verify -q master >/dev/null; then
+      base=master
+    fi
   fi
+}
 
+esc() { printf '%s' "$1" | sed 's/[&\/]/\\&/g'; }
+
+# render <template>: substitute {{NAME}} and {{BASE}}.
+render() { sed -e "s/{{NAME}}/$(esc "$name")/g" -e "s/{{BASE}}/$(esc "$base")/g" "$1"; }
+
+cmd_init() {
+  locate
+  if [[ ! -d "$lab" ]]; then
+    mkdir -p "$lab"/{handoff,notes,plans,experiments,runs,prompts}
+    render "$templates/lab.AGENTS.md" > "$lab/AGENTS.md"
+    render "$templates/PROMOTE.md"    > "$lab/PROMOTE.md"
+    render "$templates/handoff.md"    > "$lab/handoff/TEMPLATE.md"
+    git -C "$lab" init -q -b main
+    say "created $lab"
+  fi
+  if [[ ! -e "$root/AGENTS.md" ]]; then
+    render "$templates/repo.AGENTS.md" > "$root/AGENTS.md"
+    say "installed $root/AGENTS.md; commit it"
+  fi
   mkdir -p "$common/info"
   grep -qsx '.worktrees/' "$common/info/exclude" || printf '.worktrees/\n' >> "$common/info/exclude"
-
-  printf 'lab: %s\n' "$lab"
+  git config --get labgate.base  >/dev/null || git config labgate.base "$base"
+  git config --get labgate.since >/dev/null || git config labgate.since "$(git rev-parse --verify -q "$base" || true)"
+  say "ok: $name and $lab (base: $base)"
 }
 
 cmd_check() {
-  local branch="${1:-}" max="${2:-600}" range added hit lines fail=0
+  locate
+  local branch="${1:-}" max="${2:-600}" range added handoff hit f n fail=0
   [[ -n "$branch" ]] || usage
   git rev-parse --verify -q "$branch" >/dev/null || die "no such branch: $branch"
-  git rev-parse --verify -q "$base"   >/dev/null || die "no base branch: $base (set LABGATE_BASE)"
+  git rev-parse --verify -q "$base"   >/dev/null || die "no base branch: $base (set LABGATE_BASE or git config labgate.base)"
   range="$base...$branch"
   added="$(git diff --name-only --diff-filter=A "$range")"
 
-  hit="$(printf '%s\n' "$added" \
-    | grep -Ei '(^|/)(plan|notes?|todo|changelog|scratch|debug|probe|tmp|wip|old|backup|copy)([^a-z]|$)' || true)"
+  handoff="$lab/handoff/$branch.md"
+  if [[ ! -f "$handoff" ]]; then
+    echo "no handoff: $handoff (copy $lab/handoff/TEMPLATE.md and fill it in)"; fail=1
+  elif grep -Fxq -f <(grep -Ev '^(#|$)' "$lab/handoff/TEMPLATE.md") "$handoff"; then
+    echo "handoff still contains template lines: $handoff"; fail=1
+  fi
+
+  hit="$(printf '%s\n' "$added" | grep -Ei "$scaffold" || true)"
   [[ -n "$hit" ]] && { echo "scaffolding-named files:"; echo "$hit"; fail=1; }
 
   hit="$(comm -23 <(printf '%s\n' "$added" | grep / | cut -d/ -f1 | sort -u || true) \
                   <(git ls-tree --name-only "$base" | sort))"
   [[ -n "$hit" ]] && { echo "new top-level directories:"; echo "$hit"; fail=1; }
 
-  hit="$(printf '%s\n' "$added" | grep -E '\.md$' | grep -vx 'README.md' || true)"
-  [[ -n "$hit" ]] && { echo "markdown other than README.md:"; echo "$hit"; fail=1; }
+  hit="$(printf '%s\n' "$added" | grep -v / | grep -E '\.md$' | grep -Ev '^(README|AGENTS)\.md$|^LICENSE' || true)"
+  [[ -n "$hit" ]] && { echo "top-level markdown other than README.md:"; echo "$hit"; fail=1; }
 
-  lines="$(git diff --shortstat "$range" | grep -oE '[0-9]+ insertion' | grep -oE '^[0-9]+' || echo 0)"
-  (( lines > max )) && { echo "added $lines lines (> $max)"; fail=1; }
+  while IFS= read -r f; do
+    [[ -n "$f" && "$f" != *.md ]] || continue
+    hit="$(git diff -U0 "$range" -- "$f" | grep -E '^\+[^+]' | cut -c2- | grep -E "$markers" || true)"
+    [[ -n "$hit" ]] && { echo "debug or unfinished markers in $f:"; printf '%s\n' "$hit" | sed 's/^/  /'; fail=1; }
+  done < <(git diff --name-only "$range")
+
+  n="$(git diff --shortstat "$range" | grep -oE '[0-9]+ insertion' | grep -oE '^[0-9]+' || echo 0)"
+  (( n > max )) && { echo "adds $n lines (> $max)"; fail=1; }
+  n="$(git diff --shortstat "$range" | grep -oE '[0-9]+ deletion' | grep -oE '^[0-9]+' || echo 0)"
+  (( n == 0 )) && echo "note: removes nothing; a change that only adds deserves a second look"
 
   (( fail )) && exit 1
-  echo "ok: $branch adds no scaffolding relative to $base"
+  echo "ok: $branch is ready to promote onto $base"
 }
 
 case "${1:-}" in

@@ -24,25 +24,35 @@ Requires bash, git ≥ 2.28 and GNU coreutils. Nothing else.
 ln -s "$PWD/labgate" ~/.local/bin/labgate   # optional; the script also runs by path
 
 cd ~/projects/foo        # an existing git repo
-labgate init             # creates ../foo.lab, installs AGENTS.md, excludes .worktrees/
+labgate init             # creates ../foo.lab, installs AGENTS.md, excludes .worktrees/,
+                         # records the base branch; safe to re-run
 
 git worktree add .worktrees/feature -b feature main
 # build in the worktree; finish by writing ../../../foo.lab/handoff/feature.md
 
-labgate check feature    # exit 1 if the branch adds scaffolding relative to main
+labgate check feature    # exit 1 if the branch is not ready to promote
 # then follow ../foo.lab/PROMOTE.md in a fresh session
 ```
 
-`check` lists the offenders and exits 1 when the branch, relative to `main`
-(override with `LABGATE_BASE`), adds any of:
+`check` lists its findings and exits 1 when, relative to the base branch, the
+branch has any of:
 
-- files named plan, note(s), todo, changelog, scratch, debug, probe, tmp, wip,
-  old, backup or copy, with any extension or suffix after a non-letter
+- no handoff at `<lab>/handoff/<branch>.md`, or one that still contains lines
+  from the template
+- added files named plan, note(s), todo, changelog, scratch, debug, probe, tmp,
+  wip, old, backup or copy, with any extension or suffix after a non-letter
 - new top-level directories
-- markdown other than `README.md`
-- more than 600 lines (second argument overrides)
+- new top-level markdown other than `README.md`, `AGENTS.md` or `LICENSE*`
+- added lines in non-markdown files containing TODO, FIXME, XXX, HACK, DEBUG,
+  `breakpoint()`, `pdb`, `debugger` or `console.debug`
+- more than 600 added lines (second argument overrides)
 
-These are look-twice triggers, not laws. The promoter justifies or deletes.
+It also notes, without failing, a branch that removes nothing. Apart from the
+handoff, these are look-twice triggers, not laws: the promoter deletes, or
+justifies the finding in the decision note.
+
+The base branch is `LABGATE_BASE` if set, else `git config labgate.base`
+(recorded by `init`), else `main`, else `master`.
 
 ## What you get
 

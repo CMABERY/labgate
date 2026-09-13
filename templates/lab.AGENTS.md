@@ -1,7 +1,8 @@
 # {{NAME}}.lab
 
 Working area for the `{{NAME}}` repo, a sibling of this directory. Nothing here
-ships. Create whatever helps.
+ships. Create whatever helps. This directory is its own git repo; commit it
+loosely and often.
 
 - `handoff/<branch>.md`: the builder's declaration for the promoter
   (`handoff/TEMPLATE.md`).
