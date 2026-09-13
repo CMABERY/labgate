@@ -85,7 +85,7 @@ cmd_init() {
   mkdir -p "$common/info"
   grep -qsx '.worktrees/' "$common/info/exclude" || printf '.worktrees/\n' >> "$common/info/exclude"
   git config --get labgate.base  >/dev/null || git config labgate.base "$base"
-  git config --get labgate.since >/dev/null || git config labgate.since "$(git rev-parse --verify -q "$base" || true)"
+  [[ -n "$(git config --get labgate.since || true)" ]] || git config labgate.since "$(git rev-parse --verify -q "$base" || true)"
   install_hook
   say "ok: $name and $lab (base: $base)"
 }
@@ -113,8 +113,11 @@ hook_ok() { [[ -x "$common/hooks/$1" ]] && grep -q 'Installed by labgate' "$comm
 
 cmd_audit() {
   locate
-  local fail=0 hit since wt b h
+  local fail=0 hit since wt b h head tree
   git rev-parse --verify -q "$base" >/dev/null || die "no base branch: $base"
+  head="$(git -C "$root" symbolic-ref --short -q HEAD || true)"
+  [[ "$head" == "$base" ]] || { echo "main checkout is on '${head:-a detached HEAD}', not $base"; fail=1; }
+  tree="$(git -C "$root" ls-tree -r --name-only "$base")"
   [[ -d "$lab" ]] || { echo "no lab at $lab (run labgate init)"; fail=1; }
   [[ -e "$root/AGENTS.md" ]] || { echo "no $root/AGENTS.md (run labgate init)"; fail=1; }
   grep -qsx '.worktrees/' "$common/info/exclude" || { echo ".worktrees/ not excluded (run labgate init)"; fail=1; }
@@ -122,13 +125,13 @@ cmd_audit() {
     hook_ok pre-commit && hook_ok pre-merge-commit || { echo "labgate hooks missing (run labgate init)"; fail=1; }
   fi
 
-  hit="$(git -C "$root" ls-files | grep -Ei "$scaffold" || true)"
-  [[ -n "$hit" ]] && { echo "scaffolding-named files tracked:"; echo "$hit"; fail=1; }
+  hit="$(printf '%s\n' "$tree" | grep -Ei "$scaffold" || true)"
+  [[ -n "$hit" ]] && { echo "scaffolding-named files on $base:"; echo "$hit"; fail=1; }
 
-  hit="$(git -C "$root" ls-files | grep -v / | grep -E '\.md$' | grep -Ev '^(README|AGENTS)\.md$|^LICENSE' || true)"
-  [[ -n "$hit" ]] && { echo "top-level markdown other than README.md tracked:"; echo "$hit"; fail=1; }
+  hit="$(printf '%s\n' "$tree" | grep -v / | grep -E '\.md$' | grep -Ev '^(README|AGENTS)\.md$|^LICENSE' || true)"
+  [[ -n "$hit" ]] && { echo "top-level markdown other than README.md on $base:"; echo "$hit"; fail=1; }
 
-  git -C "$root" ls-files --error-unmatch .worktrees >/dev/null 2>&1 && { echo ".worktrees/ is tracked"; fail=1; }
+  printf '%s\n' "$tree" | grep -q '^\.worktrees/' && { echo ".worktrees/ is tracked on $base"; fail=1; }
 
   since="$(git config --get labgate.since || true)"
   hit="$(git -C "$root" log --first-parent --merges --oneline ${since:+"$since.."}"$base" 2>/dev/null || true)"

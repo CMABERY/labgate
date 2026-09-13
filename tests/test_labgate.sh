@@ -54,6 +54,12 @@ test_init() {
   grep -q "$labgate" "$lab/PROMOTE.md" || fail "{{LABGATE}} not substituted"
   grep -q "$lab" "$lab/PROMOTE.md" || fail "{{LAB}} not substituted"
 
+  git init -q -b main "$work/empty" && ( cd "$work/empty" && git config user.email t@t && git config user.name t \
+    && "$labgate" init >/dev/null && [[ -z $(git config labgate.since) ]] \
+    && printf 'r\n' > README.md && git add -A && LABGATE_PROMOTE=1 git commit -qm init \
+    && "$labgate" init >/dev/null && [[ $(git config labgate.since) == $(git rev-parse main) ]] ) \
+    || fail "labgate.since not repaired on re-init of an initially empty repo"
+
   git worktree add -q .worktrees/wt -b wt main
   ( cd .worktrees/wt && "$labgate" init >/dev/null ) || fail "init from a worktree"
   ( cd / && "$labgate" -C "$repo/.worktrees/wt" init >/dev/null ) || fail "-C ignored"
@@ -113,6 +119,11 @@ test_audit() {
   for want in 'worktree without handoff: feature' 'handoff without worktree: ghost' PLAN.md NOTES.md CONTRIBUTING.md 'merge commits' 'hooks missing'; do
     grep -q "$want" <<<"$out" || fail "did not report: $want"$'\n'"$out"
   done
+  git checkout -qb other; printf 'x\n' > wip.md; git add -A; git commit -qm other
+  out="$("$labgate" audit 2>&1)" || true
+  grep -q "main checkout is on 'other', not main" <<<"$out" || fail "did not report the checkout being off main"
+  ! grep -q wip.md <<<"$out" || fail "audit judged the checked-out branch instead of main"
+  git checkout -q main
   git config labgate.since "$(git rev-parse main)"
   ! grep -q 'merge commits' <<<"$("$labgate" audit 2>&1)" || fail "merge before labgate.since reported"
 }
