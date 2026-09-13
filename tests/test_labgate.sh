@@ -23,6 +23,18 @@ branch()  { git checkout -q main && git checkout -qb "$1"; }
 commit()  { git add -A && git commit -qm "$1"; }
 handoff() { printf '# handoff: %s\nBehavior change: adds output.\nScaffolding left on the branch: none.\nUncertain: nothing.\nREADME.md: unchanged.\nVerified: tests.\n' "$1" > "$lab/handoff/$1.md"; }
 
+test_invocation() {
+  "$labgate" --help | grep -q '^usage:' || fail "--help should print usage on stdout and exit 0"
+  ! "$labgate" >/dev/null 2>&1 || fail "no arguments should exit non-zero"
+  fresh
+  rm -rf "$lab"
+  mkdir -p "$work/bin" "$work/bin2"
+  ln -s "$labgate" "$work/bin/labgate"          # absolute symlink
+  ln -s ../bin/labgate "$work/bin2/labgate"     # relative symlink to it
+  "$work/bin2/labgate" init >/dev/null || fail "init through a symlink chain"
+  [[ -f $lab/PROMOTE.md ]] || fail "templates not found through the symlink chain"
+}
+
 test_init() {
   fresh
   [[ -f $lab/AGENTS.md && -f $lab/PROMOTE.md && -f $lab/handoff/TEMPLATE.md ]] || fail "lab files missing"
@@ -142,7 +154,7 @@ test_check() {
   grep -q 'removes nothing' <<<"$out" || fail "no removes-nothing note"
 
   branch trim
-  sed -i '1d' tool.py
+  : > tool.py
   commit trim
   handoff trim
   out="$("$labgate" check trim 2>&1)" || fail "trim branch should pass:"$'\n'"$out"

@@ -17,7 +17,8 @@ templates/
 tests/test_labgate.sh    exercises init and check in a throwaway repo
 ```
 
-Requires bash, git ≥ 2.28 and GNU coreutils. Nothing else.
+Requires bash, git ≥ 2.31 and a GNU or BSD userland (grep, sed, comm, find).
+Nothing else.
 
 ## Usage
 

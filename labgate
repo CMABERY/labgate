@@ -12,7 +12,14 @@
 # max defaults to 600 added lines.
 set -euo pipefail
 
-self="$(readlink -f "$0")"
+# Resolve $0 through symlinks without readlink -f (not on older BSD/macOS).
+self="$0"
+while [[ -L "$self" ]]; do
+  target="$(readlink "$self")"
+  [[ "$target" == /* ]] || target="$(dirname "$self")/$target"
+  self="$target"
+done
+self="$(cd "$(dirname "$self")" && pwd -P)/$(basename "$self")"
 templates="$(dirname "$self")/templates"
 
 scaffold='(^|/)(plan|notes?|todo|changelog|scratch|debug|probe|tmp|wip|old|backup|copy)([^a-z]|$)'
@@ -22,24 +29,24 @@ markers='(^|[^A-Za-z_])(T[O]DO|F[I]XME|X[X]X|H[A]CK|D[E]BUG|d[e]bugger)([^A-Za-z
 die() { printf 'labgate: %s\n' "$*" >&2; exit 1; }
 say() { printf '%s\n' "$*"; }
 
-usage() {
-  cat >&2 <<'EOF'
+usage_text() {
+  cat <<'EOF'
 usage:
   labgate [-C <dir>] init                    create <repo>.lab beside this repo; install rules and hook (idempotent)
   labgate [-C <dir>] start <branch>          new worktree at .worktrees/<branch> plus a handoff to fill in
   labgate [-C <dir>] check <branch> [max]    fail if <branch> is not ready to promote
   labgate [-C <dir>] close <branch>          after promotion: remove the worktree, branch and handoff
   labgate [-C <dir>] audit                   fail if the main checkout has drifted from the model
+
+-C runs as if started in <dir>. Base branch: LABGATE_BASE, else git config labgate.base, else main.
 EOF
-  exit 2
 }
+usage() { usage_text >&2; exit 2; }
 
 # Resolve the layout from anywhere inside the repo, including a worktree:
 # common (.git dir), root (main checkout), name, lab, base.
 locate() {
-  local d
-  d="$(git rev-parse --git-common-dir 2>/dev/null)" || die "not inside a git repository"
-  common="$(readlink -f "$d")"
+  common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || die "not inside a git repository"
   root="$(dirname "$common")"
   name="$(basename "$root")"
   lab="$(dirname "$root")/$name.lab"
@@ -217,6 +224,7 @@ if [[ "${1:-}" == -C ]]; then
   shift 2
 fi
 case "${1:-}" in
+  -h|--help|help) usage_text ;;
   init)  shift; cmd_init "$@" ;;
   start) shift; cmd_start "$@" ;;
   check) shift; cmd_check "$@" ;;
